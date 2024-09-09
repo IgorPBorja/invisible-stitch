@@ -58,7 +58,7 @@ def extrapolate_point_cloud(prompt: str, image_size: Tuple[int, int], look_at_pa
             assert not dry_run
 
             # jumpstart the point cloud with a regular depth estimation
-            t_initial_image = torch.from_numpy(np.asarray(initial_image)/255.).permute(2,0,1).float()
+            t_initial_image = torch.as_tensor(np.asarray(initial_image)/255.).permute(2,0,1).float()
             depth = aligned_depth = infer_with_zoe_dc(zoe_dc_model, t_initial_image, torch.zeros(h, w))
             outpainted_img = initial_image
             images = [t_initial_image.to(device)]
@@ -166,7 +166,25 @@ def supplement_point_cloud(optimization_bundle: Dict, point_cloud: Pointclouds, 
 
     return optimization_bundle, point_cloud
 
-def generate_scene(image: str, prompt: str, output_path: str = "./output.ply", mode: Literal["single", "stage", "360"] = "stage", seed: int = 0):
+def resize_image(image: Image.Image, max_resolution: int) -> Image.Image:
+    """
+    Resizes image so that the smaller dimension is no larger than max_resolution
+    """
+    ratio = image.size[0] / image.size[1]  # w/h size
+    min_dim = min(image.size[0], image.size[1])
+    if (image.size[0] == min_dim) and (min_dim > max_resolution):
+        new_height = int(max_resolution / ratio)
+        image = image.resize((max_resolution, new_height), Image.Resampling.BICUBIC)
+    elif (image.size[1] == min_dim) and (min_dim > max_resolution):
+        new_width = int(max_resolution * ratio)
+        image = image.resize((new_width, max_resolution), Image.Resampling.BICUBIC)
+    return image
+
+
+def generate_scene(
+    image: str, prompt: str, output_path: str = "./output.ply", mode: Literal["single", "stage", "360"] = "stage", seed: int = 0,
+    max_resolution: int = 1000
+):
     global device
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
@@ -184,6 +202,7 @@ def generate_scene(image: str, prompt: str, output_path: str = "./output.ply", m
     pipe = get_sd_pipeline(device)
 
     img = Image.open(image).convert("RGB")
+    img = resize_image(img, max_resolution)
 
     # crop to ensure the image dimensions are divisible by 8
     img = img.crop((0, 0, img.width - img.width % 8, img.height - img.height % 8))
